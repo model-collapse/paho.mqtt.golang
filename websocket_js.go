@@ -5,20 +5,22 @@
 package mqtt
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall/js"
 	"time"
-	"sync"
-	"log"
 )
 
 type JSWSAddr struct {
 	schema string
-	path string
+	path   string
 }
 
 func (w JSWSAddr) Network() string {
@@ -29,7 +31,7 @@ func (w JSWSAddr) String() string {
 	return w.path
 }
 
-var localAddr = JSWSAddr{schema:"ws", path:"localhost"}
+var localAddr = JSWSAddr{schema: "ws", path: "localhost"}
 var arrayBuffer = js.Global().Get("ArrayBuffer")
 var uint8Array = js.Global().Get("Uint8Array")
 var blob = js.Global().Get("Blob")
@@ -53,19 +55,19 @@ func NewWebsocket(host string, c *tls.Config, timeout time.Duration, requestHead
 		return nil
 	}))
 
-	ret := &JSWebsocket{ws:ws, path:host}
+	ret := &JSWebsocket{ws: ws, path: host}
 	ret.Init()
 	return ret, nil
 }
 
 type JSWebsocket struct {
-	ws js.Value
-	chanIn chan []byte
+	ws   js.Value
+	buf  *blockingBuffer
 	path string
 }
 
 func (w *JSWebsocket) Init() {
-	w.chanIn = make(chan []byte)
+	w.buf = newBlockingBuffer()
 	w.ws.Call("addEventListener", "message", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		evt := args[0]
 		datav := evt.Get("data")
@@ -88,9 +90,9 @@ func (w *JSWebsocket) Init() {
 				arr := uint8Array.New(abuf)
 				buf = make([]byte, arr.Get("byteLength").Int())
 				js.CopyBytesToGo(buf, arr)
-				log.Printf("Blob loaded!");
+				log.Printf("Blob loaded!")
 				log.Printf("message received, len = %v, buf = %s\n", len(buf), buf)
-				w.chanIn <- buf
+				w.buf.Write(buf)
 				return nil
 			}))
 			go fr.Call("readAsArrayBuffer", datav)
@@ -100,8 +102,7 @@ func (w *JSWebsocket) Init() {
 		}
 
 		if syncRecv {
-			//fmt.Printf("message received, len = %v\n", len(buf))
-			w.chanIn <- buf
+			w.buf.Write(buf)
 		}
 		return nil
 	}))
@@ -109,21 +110,9 @@ func (w *JSWebsocket) Init() {
 }
 
 func (w *JSWebsocket) Read(b []byte) (n int, err error) {
-	if w.chanIn == nil {
-		err = fmt.Errorf("Channel is nil")
-		return
-	}
-	
-	buf := <-w.chanIn
-	if len(buf) > len(b) {
-		n = len(b)
-		copy(b, buf)
-	} else {
-		n = len(buf)
-		copy(b, buf)
-	}
+	log.Printf("Reading %d bytes...\n", len(b))
 
-	return
+	return w.buf.Read(b)
 }
 
 func (w *JSWebsocket) Write(b []byte) (n int, err error) {
@@ -144,7 +133,7 @@ func (w *JSWebsocket) LocalAddr() net.Addr {
 }
 
 func (w *JSWebsocket) RemoteAddr() net.Addr {
-	return JSWSAddr{schema:"ws", path:w.path}
+	return JSWSAddr{schema: "ws", path: w.path}
 }
 
 func (w *JSWebsocket) SetDeadline(t time.Time) error {
@@ -157,4 +146,34 @@ func (w *JSWebsocket) SetReadDeadline(t time.Time) error {
 
 func (w *JSWebsocket) SetWriteDeadline(t time.Time) error {
 	return nil
+}
+
+type blockingBuffer struct {
+	buf  bytes.Buffer
+	cond *sync.Cond
+}
+
+func newBlockingBuffer() *blockingBuffer {
+	m := sync.Mutex{}
+	return &blockingBuffer{
+		cond: sync.NewCond(&m),
+		buf:  bytes.Buffer{},
+	}
+}
+
+func (br *blockingBuffer) Write(b []byte) (ln int, err error) {
+	ln, err = br.buf.Write(b)
+	br.cond.Broadcast()
+	return
+}
+
+func (br *blockingBuffer) Read(b []byte) (ln int, err error) {
+	ln, err = br.buf.Read(b)
+	if err == io.EOF {
+		br.cond.L.Lock()
+		br.cond.Wait()
+		br.cond.L.Unlock()
+		ln, err = br.buf.Read(b)
+	}
+	return
 }
