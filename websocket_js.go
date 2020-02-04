@@ -89,7 +89,7 @@ func (w *JSWebsocket) Init() {
 				buf = make([]byte, arr.Get("byteLength").Int())
 				js.CopyBytesToGo(buf, arr)
 				log.Printf("Blob loaded!");
-				log.Printf("message received, len = %v\n", len(buf))
+				log.Printf("message received, len = %v, buf = %s\n", len(buf), buf)
 				w.chanIn <- buf
 				return nil
 			}))
@@ -130,6 +130,7 @@ func (w *JSWebsocket) Write(b []byte) (n int, err error) {
 	arr := uint8Array.New(len(b))
 	js.CopyBytesToJS(arr, b)
 	w.ws.Call("send", arr.Get("buffer"))
+	log.Printf("message [%s] sent!", b)
 	return len(b), nil
 }
 
