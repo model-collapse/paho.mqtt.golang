@@ -13,7 +13,7 @@ import (
 	"syscall/js"
 	"time"
 	"sync"
-	//"log"
+	"log"
 )
 
 type JSWSAddr struct {
@@ -72,15 +72,15 @@ func (w *JSWebsocket) Init() {
 		var buf []byte
 		syncRecv := true
 		if datav.Type() == js.TypeString {
-			//fmt.Println("It is an String")
+			log.Println("It is an String")
 			buf = []byte(datav.String())
 		} else if datav.InstanceOf(arrayBuffer) {
-			//fmt.Println("It is an ArrayBuffer!")
+			log.Println("It is an ArrayBuffer!")
 			arr := uint8Array.New(datav)
 			buf = make([]byte, arr.Get("byteLength").Int())
 			js.CopyBytesToGo(buf, arr)
 		} else if datav.InstanceOf(blob) {
-			//fmt.Println("It is an Blob!")
+			log.Println("It is an Blob!")
 			syncRecv = false
 			fr := fileReader.New()
 			fr.Call("addEventListener", "loadend", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -88,8 +88,8 @@ func (w *JSWebsocket) Init() {
 				arr := uint8Array.New(abuf)
 				buf = make([]byte, arr.Get("byteLength").Int())
 				js.CopyBytesToGo(buf, arr)
-				//log.Printf("Blob loaded!");
-				//fmt.Printf("message received, len = %v\n", len(buf))
+				log.Printf("Blob loaded!");
+				log.Printf("message received, len = %v\n", len(buf))
 				w.chanIn <- buf
 				return nil
 			}))
