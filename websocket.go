@@ -1,4 +1,7 @@
+// I should go first
+
 // +build !js !wasm
+
 package mqtt
 
 import (
