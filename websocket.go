@@ -1,3 +1,4 @@
+// +build !js !wasm
 package mqtt
 
 import (
